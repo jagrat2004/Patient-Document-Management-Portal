@@ -437,6 +437,360 @@ rm -rf node_modules package-lock.json
 npm install
 ```
 
+## ❓ Technical Decisions & FAQs
+
+### Q1. What frontend framework did you use and why? (React, Vue, etc.)
+
+**Answer: React 18 with Vite**
+
+- **React** was chosen for its:
+  - Large ecosystem and community support
+  - Excellent component reusability and state management patterns
+  - Strong typing support with optional TypeScript (can be added later)
+  - Popularity in healthcare/medical applications
+  - Easy integration with form libraries and validation tools
+
+- **Vite** as the build tool instead of Create React App because:
+  - Ultra-fast Hot Module Replacement (HMR) for superior dev experience
+  - 5-10x faster build times compared to Webpack
+  - Smaller bundle size out of the box
+  - Modern ES modules-based development
+  - Better TypeScript support
+
+### Q2. What backend framework did you choose and why? (Express, Flask, Django, etc.)
+
+**Answer: Express.js with Node.js**
+
+- **Express.js** was chosen over Flask/Django because:
+  - JavaScript/Node.js allows **code sharing** between frontend and backend (same language ecosystem)
+  - Lightweight and minimal, perfect for file upload/download operations
+  - Excellent middleware ecosystem (Multer for file handling, CORS for frontend integration)
+  - High performance with event-driven, non-blocking I/O model
+  - Fast development iteration with hot-reload capabilities
+  - Perfect for REST APIs (which is what we're building)
+
+- Why not Django/Flask?
+  - Django is overkill for this use case (too much boilerplate)
+  - Python adds a language context switch (frontend devs need to learn Python)
+  - Extra overhead for a simple CRUD API
+
+- Why not Go/Rust?
+  - Overkill for MVP and increases development complexity
+  - No clear advantage for this use case
+  - Larger learning curve
+
+### Q3. What database did you choose and why? (SQLite vs PostgreSQL vs others)
+
+**Answer: SQLite**
+
+**SQLite pros:**
+- ✅ Zero configuration - no separate database server needed
+- ✅ Single file storage (`db.sqlite`) - easy to backup and deploy
+- ✅ Perfect for MVP/prototyping phase
+- ✅ Sufficient for local development and small-scale deployments
+- ✅ Built-in, no additional dependencies to manage
+- ✅ Automatic and atomic transactions
+
+**When to upgrade to PostgreSQL:**
+- When scaling to 1,000+ concurrent users
+- When you need advanced features (JSON types, full-text search, geo-indexing)
+- When you need robust backup/replication strategies
+- When you have multi-server deployments
+
+**Alternative considerations:**
+- **MongoDB** - Not suitable for this use case (relational data, strict schema needed)
+- **MySQL/MariaDB** - Good alternative to PostgreSQL, same scaling benefits
+- **DynamoDB/Firestore** - Overkill for document metadata storage
+
+### Q4. If you were to support 1,000 users, what changes would you consider?
+
+**Database Scaling:**
+1. **Migrate from SQLite to PostgreSQL**
+   - Support concurrent read/write operations
+   - Better indexing strategies (B-tree indexes on frequently queried columns)
+   - Connection pooling (PgBouncer)
+
+**Backend Changes:**
+1. **Load Balancing** - Deploy multiple Express.js instances behind nginx/HAProxy
+2. **Caching Layer** - Add Redis for:
+   - Session management (JWT token blacklist)
+   - Document metadata caching
+   - Rate limiting
+3. **Message Queue** - Add Bull/RabbitMQ for:
+   - Async document processing
+   - Background jobs (virus scanning, compression)
+4. **File Storage Migration**:
+   - Move from local `uploads/` to S3/Azure Blob Storage
+   - Implement CDN for faster downloads
+5. **Authentication** - Implement JWT + Refresh tokens + Session management
+6. **API Rate Limiting** - Prevent abuse (e.g., 100 requests/minute per user)
+7. **Logging & Monitoring** - ELK Stack or DataDog for performance monitoring
+8. **Compression** - Enable gzip compression for API responses
+
+**Frontend Changes:**
+1. **Code Splitting** - Lazy load components for faster initial load
+2. **Service Workers** - Implement offline support and caching strategies
+3. **Progressive Image Loading** - Show thumbnails before full documents
+
+**Infrastructure:**
+1. **Containerization** - Docker + Kubernetes for orchestration
+2. **CI/CD Pipeline** - GitHub Actions or GitLab CI for automated deployments
+3. **Database Backups** - Automated daily backups to S3
+4. **Monitoring & Alerts** - Performance metrics, error tracking (Sentry)
+5. **Horizontal Scaling** - Multiple servers with load balancing
+
+**Estimated Costs for 1,000 Concurrent Users:**
+- Server Infrastructure: $500-1000/month (3-5 instances)
+- Database (PostgreSQL): $100-300/month
+- File Storage (S3): $20-100/month (depending on file volume)
+- CDN: $50-200/month
+- Monitoring/Logging: $100-300/month
+- **Total: ~$800-2000/month**
+
+### Q5. Describe the step-by-step process of what happens when a file is uploaded and when it is downloaded.
+
+#### **Upload Process (Step-by-Step):**
+
+1. **Frontend - User Selection**
+   - User selects PDF file via file input (`UploadForm.jsx`)
+   - Client-side validation:
+     - Check file extension is `.pdf`
+     - Check file size ≤ 8 MB
+     - Show error alert if validation fails
+
+2. **Frontend - API Request**
+   - Create `FormData` with selected file
+   - Send POST request to `http://localhost:5000/api/documents/upload`
+   - Show loading spinner to user
+
+3. **Backend - Middleware Processing**
+   - `Multer` middleware intercepts request
+   - Validates file:
+     - Checks MIME type is `application/pdf`
+     - Checks file extension is `.pdf`
+     - Checks file size ≤ 8 MB (8,388,608 bytes)
+   - If validation fails, return 400 error
+   - If valid, temporarily store in memory/disk
+
+4. **Backend - Controller Logic**
+   - Generate unique ID: `uuid.v4()` → e.g., "550e8400-e29b-41d4-a716-446655440000"
+   - Create filename: `{uuid}.pdf`
+   - Create file path: `uploads/550e8400-e29b-41d4-a716-446655440000.pdf`
+   - Move temp file to `uploads/` directory
+   - Get file stats (size, timestamps)
+
+5. **Backend - Database Insertion**
+   - Execute INSERT query:
+     ```sql
+     INSERT INTO documents (id, filename, original_name, filepath, filesize, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ```
+   - Commit transaction (atomically)
+
+6. **Backend - Response**
+   - Return 201 Created status with document metadata:
+     ```json
+     {
+       "success": true,
+       "message": "Document uploaded successfully",
+       "data": { id, filename, original_name, filepath, filesize, created_at, updated_at }
+     }
+     ```
+
+7. **Frontend - Success Handling**
+   - Hide loading spinner
+   - Display success alert: "Document uploaded successfully"
+   - Refresh document list via `getDocuments()` API call
+   - Clear file input
+   - Alert auto-dismisses after 5 seconds
+
+**Total Time: ~500-1500ms** (depends on file size and network speed)
+
+---
+
+#### **Download Process (Step-by-Step):**
+
+1. **Frontend - User Action**
+   - User clicks "Download" button on a document row in `DocumentsTable.jsx`
+   - Button passes document ID to click handler
+
+2. **Frontend - API Request**
+   - Call `downloadDocument(documentId)` from `api/index.js`
+   - Send GET request to `http://localhost:5000/api/documents/{documentId}`
+   - Set response type to `arraybuffer` (binary data)
+
+3. **Backend - Route Handler**
+   - Route `GET /api/documents/:id` triggers `downloadDocument` controller
+   - Extract document ID from URL parameter
+
+4. **Backend - Database Query**
+   - Execute SELECT query:
+     ```sql
+     SELECT * FROM documents WHERE id = ?
+     ```
+   - If no document found, return 404 error
+   - If found, retrieve filepath from record
+
+5. **Backend - File Validation**
+   - Check if file exists on disk at `filepath`
+   - Verify file is readable
+   - Get file stats (size, modification time)
+   - If file missing, return 404 error
+
+6. **Backend - Response Headers**
+   - Set HTTP headers:
+     ```
+     Content-Type: application/pdf
+     Content-Disposition: attachment; filename="patient_report.pdf"
+     Content-Length: {filesize}
+     ```
+   - `Content-Disposition` tells browser to download (not display inline)
+   - `filename` sets the downloaded file name (original name, not UUID)
+
+7. **Backend - Stream File**
+   - Stream binary PDF content in response body
+   - Node.js uses `fs.createReadStream()` for efficient memory usage
+
+8. **Frontend - Browser Handling**
+   - Browser receives binary data
+   - `Content-Disposition: attachment` triggers download dialog
+   - User sees save dialog with filename
+   - Browser downloads to user's default downloads folder
+
+9. **Frontend - Completion**
+   - Download completes
+   - No error alert shown (success is silent)
+
+**Total Time: ~200-2000ms** (depends on file size and network speed)
+
+---
+
+**Architecture Diagram:**
+
+```
+UPLOAD FLOW:
+User → File Input → Client Validation → FormData → POST /api/documents/upload
+    → Multer Middleware → Server Validation → Generate UUID → Save to Disk
+    → DB INSERT → 201 Response → Frontend Success Alert → Refresh List
+
+DOWNLOAD FLOW:
+User → Click Download → GET /api/documents/{id} → DB Query → File Exists Check
+    → Set Headers → Stream File → Browser Download Dialog → Save to Disk
+```
+
+### Q6. What assumptions did you make while building this? (e.g., file size limits, authentication, concurrency)
+
+**Assumptions Made:**
+
+1. **File Size Limit: 8 MB**
+   - Assumption: Most medical PDFs are under 8 MB
+   - Reasoning: Prevents server overload, reasonable for hospital documents
+   - Trade-off: Cannot upload high-resolution scan batches
+   - Scalability: Increase to 100+ MB with cloud storage (S3/Azure Blob)
+
+2. **No Authentication**
+   - Assumption: Local/trusted environment (hospital network)
+   - Reasoning: Focus on CRUD functionality for MVP
+   - Risk: Anyone with access to server can upload/delete documents
+   - Production: Must implement JWT + role-based access control (RBAC)
+     - Admin can delete any document
+     - Doctor can upload and download their patient docs
+     - Nurse can view only assigned patient documents
+
+3. **Single-Server Deployment**
+   - Assumption: All requests processed on one machine
+   - Reasoning: MVP doesn't require distributed system complexity
+   - Limitation: No redundancy, single point of failure
+   - Scaling: Add load balancer + multiple backend instances
+
+4. **Local File Storage**
+   - Assumption: All PDFs stored in `uploads/` directory on server
+   - Reasoning: Simple, zero-config, works for single server
+   - Risk: Disk failure = data loss
+   - Production: Use S3/Azure Blob with automatic replication
+
+5. **Sequential File Processing**
+   - Assumption: One file is processed at a time (Node.js event loop)
+   - Reasoning: Sufficient for MVP (no concurrent upload burden)
+   - Limitation: 10,000 simultaneous uploads would queue
+   - Scaling: Add message queue (Bull/RabbitMQ) for async processing
+
+6. **No Rate Limiting**
+   - Assumption: Trusted users won't abuse the API
+   - Reasoning: MVP focus on functionality over security
+   - Risk: Malicious user could spam uploads
+   - Production: Add rate limiting (100 req/min per IP)
+
+7. **No Virus/Malware Scanning**
+   - Assumption: PDFs are trusted/pre-scanned
+   - Reasoning: Medical facilities have network antivirus
+   - Risk: Compromised PDF could execute malware
+   - Production: Integrate ClamAV or VirusTotal API
+
+8. **No File Encryption**
+   - Assumption: Encryption handled by network/TLS
+   - Reasoning: Files in transit use HTTPS (when deployed)
+   - Risk: Unencrypted at rest
+   - Production: Encrypt files at rest (AES-256) in database
+
+9. **No Audit Logging**
+   - Assumption: No compliance requirements (not HIPAA-compliant)
+   - Reasoning: MVP focuses on feature completeness
+   - Risk: Cannot trace who deleted a critical document
+   - Production: Log all operations (who, what, when, from where)
+
+10. **Synchronous Database Writes**
+    - Assumption: SQLite handles transactions correctly
+    - Reasoning: Works for single-server, low-concurrency scenario
+    - Risk: Two simultaneous uploads could corrupt database
+    - Production: Add connection pooling + transaction locks
+
+11. **No Backup Strategy**
+    - Assumption: Manual backups of `db.sqlite` and `uploads/`
+    - Reasoning: MVP phase, user responsible for backups
+    - Risk: Data loss if server crashes
+    - Production: Automated daily backups to S3
+
+12. **PDF Only**
+    - Assumption: Only PDF files are supported
+    - Reasoning: Medical documents are typically PDFs
+    - Limitation: Cannot upload Word docs, images, etc.
+    - Scalability: Add MIME type config for multi-format support
+
+13. **Unique Filenames (UUID-based)**
+    - Assumption: Filename conflicts are unlikely
+    - Reasoning: UUID collision probability is virtually zero
+    - Benefit: Simple filename strategy, prevents duplicates
+    - Trade-off: Original filename hidden from filesystem
+
+14. **Development vs Production Parity**
+    - Assumption: Same code runs in dev and production
+    - Reasoning: Reduces environment-specific bugs
+    - Note: Use environment variables for configuration differences
+
+15. **No WebSockets**
+    - Assumption: No real-time updates needed
+    - Reasoning: HTTP request/response sufficient for MVP
+    - Use case: If multiple doctors edit simultaneously, add WebSockets for live collaboration
+
+---
+
+**Summary Table:**
+
+| Aspect | Current (MVP) | Production Needed |
+|--------|---------------|------------------|
+| **Users** | 1-10 | 1,000+ |
+| **Authentication** | None | JWT + RBAC |
+| **Database** | SQLite | PostgreSQL |
+| **File Storage** | Local disk | S3/Azure Blob |
+| **Scaling** | Single server | Load-balanced |
+| **Backups** | Manual | Automated hourly |
+| **Monitoring** | Console logs | ELK Stack + Alerts |
+| **Encryption** | In-transit (HTTPS) | At-rest + In-transit |
+| **File Size Limit** | 8 MB | 100+ MB |
+| **Rate Limiting** | None | 100 req/min |
+| **Audit Trail** | None | Complete logging |
+
 ## 📄 License
 
 MIT
