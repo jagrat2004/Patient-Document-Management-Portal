@@ -1,0 +1,23 @@
+{
+  "name": "document-management-backend",
+  "version": "1.0.0",
+  "description": "PDF Document Management Backend API",
+  "main": "src/server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node src/server.js",
+    "migrate": "node src/db/migrate.js"
+  },
+  "keywords": ["pdf", "document", "management", "api"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "multer": "^1.4.5-lts.1",
+    "sqlite3": "^5.1.6",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "uuid": "^9.0.0"
+  }
+}
